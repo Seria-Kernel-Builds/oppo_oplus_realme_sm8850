@@ -89,7 +89,7 @@ on:
         description: '内核后缀(留空默认,开头别加连字符,勿加空格等影响指令运行的保留字符)'
         required: false
         type: string
-        default: 'SeriaTvT'
+        default: ''
 
 jobs:
   build:
