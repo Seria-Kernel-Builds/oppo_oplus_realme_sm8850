@@ -657,6 +657,10 @@ jobs:
           export OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump OBJSIZE=llvm-size STRIP=llvm-strip
           # 5. 编译前运行官方环境配置脚本
           source "./_setup_env.sh" 2>/dev/null || true
+          # 覆盖 _setup_env.sh 的环境变量设置，确保构建环境信息被劫持
+          export KBUILD_BUILD_USER="${{ env.KBUILD_BUILD_USER }}"
+          export KBUILD_BUILD_HOST="${{ env.KBUILD_BUILD_HOST }}"
+          export KBUILD_BUILD_TIMESTAMP="${{ env.KBUILD_BUILD_TIMESTAMP }}"
           #在构建内核的同时清除不必要的.NET, Android NDK, Haskell, CodeQL运行库，清理空间且不阻塞后续步骤运行
           sudo rm -rf /usr/share/dotnet &
           sudo rm -rf /usr/local/lib/android &
