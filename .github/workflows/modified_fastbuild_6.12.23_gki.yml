@@ -7,6 +7,10 @@ env:
   SUB_VERSION: '23_gki'
   KERNEL_NAME: 'android16-5-g75e9b1c7ae7c-abogki463945075-4k'
   CCACHE_KEY: ccache-neov5-gki-6.12.23
+  KBUILD_BUILD_USER: 'kleaf'
+  KBUILD_BUILD_HOST: 'build-host'
+  KBUILD_BUILD_TIMESTAMP: 'Thu Nov 27 08:45:40 UTC 2025'
+  SOURCE_DATE_EPOCH: 1764233140
 
 on:
   workflow_dispatch:
@@ -97,9 +101,6 @@ jobs:
     outputs:
       ksuver: ${{ steps.ksu_version.outputs.ksuver }}
       ak3name: ${{ steps.create_zip.outputs.ak3name }}
-      kbuild_user: ${{ steps.compile.outputs.user }}
-      kbuild_host: ${{ steps.compile.outputs.host }}
-      kbuild_timestamp: ${{ steps.compile.outputs.timestamp }}
     permissions:
       actions: write
       contents: read
@@ -656,16 +657,6 @@ jobs:
           export OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump OBJSIZE=llvm-size STRIP=llvm-strip
           # 5. 编译前运行官方环境配置脚本
           source "./_setup_env.sh" 2>/dev/null || true
-          # 伪装原厂编译信息
-          export KBUILD_BUILD_USER="kleaf"
-          export KBUILD_BUILD_HOST="build-host"
-          export KBUILD_BUILD_TIMESTAMP="Thu Nov 27 08:45:40 UTC 2025"
-          #输出为全局
-          echo "user=$KBUILD_BUILD_USER" >> $GITHUB_OUTPUT
-          echo "host=$KBUILD_BUILD_HOST" >> $GITHUB_OUTPUT
-          echo "timestamp=$KBUILD_BUILD_TIMESTAMP" >> $GITHUB_OUTPUT
-          # 将时间转换为 Unix Epoch 时间戳
-          export SOURCE_DATE_EPOCH=1764233140
           #在构建内核的同时清除不必要的.NET, Android NDK, Haskell, CodeQL运行库，清理空间且不阻塞后续步骤运行
           sudo rm -rf /usr/share/dotnet &
           sudo rm -rf /usr/local/lib/android &
@@ -858,8 +849,8 @@ jobs:
           - 内核版本号: ${{ env.FULL_VERSION }}
           - 编译时间: ${{ env.TIME_FORM }}
           - KSU分支：${{ env.KSU_TYPENAME }}
-          - 伪装时间： ${{ needs.build.outputs.kbuild_timestamp }}
-          - 伪装编译信息：${{ needs.build.outputs.kbuild_user }}@${{ needs.build.outputs.kbuild_host }}
+          - 伪装时间： ${{ env.KBUILD_BUILD_TIMESTAMP }}
+          - 伪装编译信息：${{ env.KBUILD_BUILD_USER }}@${{ env.KBUILD_BUILD_HOST }}
           - susfs支持：${{ github.event.inputs.susfs_enable }}
           - KPM支持 ：${{ github.event.inputs.kpm_enable }}
           - LZ4支持：${{ github.event.inputs.lz4_enable }}
