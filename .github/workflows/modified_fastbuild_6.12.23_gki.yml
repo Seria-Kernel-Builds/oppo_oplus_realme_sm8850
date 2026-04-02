@@ -864,7 +864,8 @@ jobs:
           - 内核级基带保护支持：${{ github.event.inputs.baseband_guard }}
           ### 更新信息
           - ${{ env.KSU_TYPENAME }}版本：${{ needs.build.outputs.ksuver }}
-
+          EOF
+          
           gh release create "${{ env.TAG_HEAD }}-${{ env.TIME }}" \
             --repo "${{ github.repository }}" \
             --title "${{ env.TAG_HEAD }}-${{ env.FULL_VERSION }}" \
