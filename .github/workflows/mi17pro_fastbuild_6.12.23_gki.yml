@@ -64,6 +64,11 @@ on:
         required: true
         type: boolean
         default: 'true'
+      hide_nat:
+        description: '是否隐藏IP6_NF_NAT (用于修复部分机型因vintf规则导致的开机弹窗提示"设备内部出现了问题")'
+        required: true
+        type: boolean
+        default: 'false'
       adios_enable:
         description: '是否启用ADIOS IO调度器支持(提升IO读写性能)'
         required: true
@@ -475,9 +480,16 @@ jobs:
           echo "CONFIG_IP6_NF_NAT=y" >> ./common/arch/arm64/configs/gki_defconfig
           echo "CONFIG_IP6_NF_TARGET_MASQUERADE=y" >> ./common/arch/arm64/configs/gki_defconfig
           #由于部分机型的vintf兼容性检测规则，在开启CONFIG_IP6_NF_NAT后开机会出现"您的设备内部出现了问题。请联系您的设备制造商了解详情。"的提示，故添加一个配置修复补丁，在编译内核时隐藏CONFIG_IP6_NF_NAT=y但不影响对应功能编译
-          cd common
-          wget https://github.com/$GITHUB_REPOSITORY/raw/refs/heads/$GITHUB_REF_NAME/other_patch/config.patch
-          patch -p1 -F 3 < config.patch || true
+          #判断 hide_nat 是否为 true，应用上述补丁
+          if [[ "${{ github.event.inputs.hide_nat }}" == "true" ]]; then
+            echo "正在应用配置修复补丁，隐藏CONFIG_IP6_NF_NAT..."
+            cd common
+            wget https://github.com/$GITHUB_REPOSITORY/raw/refs/heads/$GITHUB_REF_NAME/other_patch/config.patch
+            patch -p1 -F 3 < config.patch || true
+            cd ..
+          else
+            echo "未开启隐藏IP6_NF_NAT，跳过补丁应用。"
+          fi
 
       - name: 添加 BBR 等一系列拥塞控制算法
         run: |
@@ -883,6 +895,7 @@ jobs:
           - LZ4支持：${{ github.event.inputs.lz4_enable }}
           - LZ4KD支持：${{ github.event.inputs.lz4kd_enable }}
           - 网络功能增强：${{ github.event.inputs.better_net }}
+          - 隐藏CONFIG_IP6_NF_NAT=y：${{ github.event.inputs.hide_nat }}
           - BBR/Brutal 等拥塞控制算法支持：${{ github.event.inputs.bbr_enable }}
           - ADIOS IO调度器支持：${{ github.event.inputs.adios_enable }}
           - Re-Kernel支持：${{ github.event.inputs.rekernel_enable }}
