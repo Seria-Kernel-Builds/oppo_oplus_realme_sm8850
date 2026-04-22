@@ -6,7 +6,7 @@ env:
   KERNEL_VERSION: '6.12'
   SUB_VERSION: '23_gki'
   KERNEL_NAME: 'android16-5-g75e9b1c7ae7c-abogki463945075-4k'
-  CCACHE_KEY: ccache-ecsv1-gki-6.12.23
+  CCACHE_KEY: ccache-ecsv2-gki-6.12.23
   KBUILD_BUILD_USER: 'kleaf'
   KBUILD_BUILD_HOST: 'build-host'
   KBUILD_BUILD_TIMESTAMP: 'Thu Nov 27 08:45:40 UTC 2025'
@@ -30,7 +30,7 @@ on:
         description: '是否开启susfs(用于增强隐藏环境挂载功能; 可能轻微增加耗电，上游更新导致不稳定时或不需要可关闭)'
         required: true
         type: boolean
-        default: 'true'
+        default: 'false'
       kpm_enable:
         description: '是否开启kpm(builtin-使用(re)sukisu内置kpm, kpn-使用独立kpm实现(支持任意KSU/面具环境); 不需要可保持默认关闭)'
         required: true
@@ -83,9 +83,14 @@ on:
         description: '是否开启内核级基带保护(阻止一切对非用户分区的写入，有效防止格机)'
         required: true
         type: boolean
-        default: 'true'
+        default: 'false'
       lxc_docker_support:
         description: '是否开启lxc/docker内核功能支持'
+        required: true
+        type: boolean
+        default: 'true'
+      use_public_ccache:
+        description: '是否在本地缓存未命中时从公共预置仓库拉取ccache缓存'
         required: true
         type: boolean
         default: 'false'
@@ -93,7 +98,7 @@ on:
         description: '更新ccache缓存(将本次编译生成的ccache缓存覆盖至仓库缓存，在更改编译配置、源码或需要刷新缓存时开启)'
         required: true
         type: boolean
-        default: 'false'
+        default: 'true'
       ccache_debug:
         description: '是否上传 Ccache调试日志(用于调试, 无需要不必开启)'
         required: true
@@ -116,6 +121,7 @@ jobs:
     outputs:
       ksuver: ${{ steps.ksu_version.outputs.ksuver }}
       ak3name: ${{ steps.create_zip.outputs.ak3name }}
+      imgname: ${{ steps.create_zip.outputs.imgname }}
     permissions:
       actions: write
       contents: read
@@ -193,6 +199,7 @@ jobs:
             ${{ env.CCACHE_KEY }}-
 
       - name: 拉取公共预置 ccache 缓存
+        if: inputs.use_public_ccache
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -782,11 +789,15 @@ jobs:
           fi
           if [[ -n "${{ github.event.inputs.kernel_suffix }}" ]]; then
             AK3_NAME=AnyKernel3_${KSU_TYPENAME}_${{ env.KSUVER }}_${{ env.KERNEL_VERSION }}_${{ github.event.inputs.kernel_suffix }}.zip
+            IMG_NAME=Image_${KSU_TYPENAME}_${{ env.KSUVER }}_${{ env.KERNEL_VERSION }}_${{ github.event.inputs.kernel_suffix }}
           else
             AK3_NAME=AnyKernel3_${KSU_TYPENAME}_${{ env.KSUVER }}_${{ env.KERNEL_VERSION }}_${{ env.KERNEL_NAME }}.zip
+            IMG_NAME=Image_${KSU_TYPENAME}_${{ env.KSUVER }}_${{ env.KERNEL_VERSION }}_${{ env.KERNEL_NAME }}
           fi
+          cp ./Image ../$IMG_NAME
           zip -r ../$AK3_NAME ./*
           echo "ak3name=$AK3_NAME" >> $GITHUB_OUTPUT
+          echo "imgname=$IMG_NAME" >> $GITHUB_OUTPUT
           
           #为AK3添加注释（调试信息）
           CLEAN_SUB_VERSION="${{ env.SUB_VERSION }}"
@@ -830,6 +841,12 @@ jobs:
           path: ${{ github.workspace }}/kernel_workspace/AnyKernel*.zip
           archive: false
 
+      - name: 上传 Image 工件
+        uses: actions/upload-artifact@v7
+        with:
+          path: ${{ github.workspace }}/kernel_workspace/Image_*
+          archive: false
+
   release:
     if: inputs.release
     needs: build
@@ -846,6 +863,12 @@ jobs:
           name: ${{ needs.build.outputs.ak3name }}
           path: ./release_zips
           skip-decompress: true
+
+      - name: 下载 Image 工件
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.build.outputs.imgname }}
+          path: ./release_zips
 
       - name: 设置环境变量
         run: |
@@ -910,4 +933,5 @@ jobs:
             --repo "${{ github.repository }}" \
             --title "${{ env.TAG_HEAD }}-${{ env.FULL_VERSION }}" \
             --notes-file release_notes.md \
-            release_zips/AnyKernel3_*.zip
+            release_zips/AnyKernel3_*.zip \
+            release_zips/Image_*
