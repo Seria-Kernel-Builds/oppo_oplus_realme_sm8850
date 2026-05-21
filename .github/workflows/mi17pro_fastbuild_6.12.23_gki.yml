@@ -196,10 +196,7 @@ jobs:
           rm -f ./ccache &
           
           echo "正在克隆源码仓库..."
-          aria2c -s16 -x16 -k1M https://github.com/Seria-Kernel-Builds/android_gki_kernel_common/archive/refs/heads/android16-6.12-2025-06.zip -o common.zip && 
-          unzip -q common.zip && 
-          mv "android_gki_kernel_common-android16-6.12-2025-06" common &&
-          rm -rf common.zip &
+          git clone --depth 1 --single-branch https://github.com/Seria-Kernel-Builds/android_gki_kernel_common.git -b android16-6.12-2025-06 common &
           
           echo "正在克隆llvm-clang19工具链..." &&
           mkdir -p clang19 &&
@@ -805,6 +802,12 @@ jobs:
             export KBUILD_BUILD_USER="${{ env.KBUILD_BUILD_USER }}"
             export KBUILD_BUILD_HOST="${{ env.KBUILD_BUILD_HOST }}"
             export KBUILD_BUILD_TIMESTAMP="${{ env.KBUILD_BUILD_TIMESTAMP }}"
+          else
+            # 不伪装模式：清除 env 脚本中预设的重现性构建环境变量，使内核构建系统使用真实的构建时间、用户和主机
+            unset KBUILD_BUILD_USER
+            unset KBUILD_BUILD_HOST
+            unset KBUILD_BUILD_TIMESTAMP
+            unset SOURCE_DATE_EPOCH
           fi
           #在构建内核的同时清除不必要的.NET, Android NDK, Haskell, CodeQL运行库，清理空间且不阻塞后续步骤运行
           sudo rm -rf /usr/share/dotnet &
