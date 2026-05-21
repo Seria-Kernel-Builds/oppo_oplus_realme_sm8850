@@ -5,12 +5,7 @@ env:
   ANDROID_VERSION: 'android16'
   KERNEL_VERSION: '6.12'
   SUB_VERSION: '23_gki'
-  KERNEL_NAME: 'android16-5-g75e9b1c7ae7c-abogki463945075-4k'
   CCACHE_KEY: ccache-ecsv3-gki-6.12.23
-  KBUILD_BUILD_USER: 'kleaf'
-  KBUILD_BUILD_HOST: 'build-host'
-  KBUILD_BUILD_TIMESTAMP: 'Thu Nov 27 08:45:40 UTC 2025'
-  SOURCE_DATE_EPOCH: 1764233140
 
 on:
   workflow_dispatch:
@@ -118,11 +113,36 @@ on:
         required: true
         type: boolean
         default: 'true'
-      kernel_suffix:
-        description: '内核后缀(留空默认,开头别加连字符,勿加空格等影响指令运行的保留字符)'
+      disguise_enable:
+        description: '是否启用伪装(关闭后KERNEL_NAME/BUILD信息将完全自动生成，不进行任何伪装)'
+        required: true
+        type: boolean
+        default: 'true'
+      disguise_kernel_name:
+        description: '伪装内核名称(仅伪装开启时生效)'
         required: false
         type: string
-        default: ''
+        default: 'android16-5-g75e9b1c7ae7c-abogki463945075-4k'
+      disguise_build_user:
+        description: '伪装构建用户名(仅伪装开启时生效)'
+        required: false
+        type: string
+        default: 'kleaf'
+      disguise_build_host:
+        description: '伪装构建主机名(仅伪装开启时生效)'
+        required: false
+        type: string
+        default: 'build-host'
+      disguise_build_timestamp:
+        description: '伪装构建时间戳(仅伪装开启时生效，格式: Thu Nov 27 08:45:40 UTC 2025)'
+        required: false
+        type: string
+        default: 'Thu Nov 27 08:45:40 UTC 2025'
+      disguise_source_date_epoch:
+        description: '伪装SOURCE_DATE_EPOCH(仅伪装开启时生效)'
+        required: false
+        type: string
+        default: '1764233140'
 
 jobs:
   build:
@@ -135,6 +155,23 @@ jobs:
       actions: write
       contents: read
     steps:
+      - name: 设置伪装/构建信息变量
+        id: setup_disguise
+        run: |
+          if [[ "${{ github.event.inputs.disguise_enable }}" == "true" ]]; then
+            echo "伪装模式已启用，使用用户提供的伪装值..."
+            echo "KERNEL_NAME=${{ github.event.inputs.disguise_kernel_name }}" >> $GITHUB_ENV
+            echo "KBUILD_BUILD_USER=${{ github.event.inputs.disguise_build_user }}" >> $GITHUB_ENV
+            echo "KBUILD_BUILD_HOST=${{ github.event.inputs.disguise_build_host }}" >> $GITHUB_ENV
+            echo "KBUILD_BUILD_TIMESTAMP=${{ github.event.inputs.disguise_build_timestamp }}" >> $GITHUB_ENV
+            echo "SOURCE_DATE_EPOCH=${{ github.event.inputs.disguise_source_date_epoch }}" >> $GITHUB_ENV
+            echo "DISGUISE_ENABLED=true" >> $GITHUB_ENV
+          else
+            echo "伪装模式已关闭，使用自动生成的构建信息..."
+            echo "KERNEL_NAME=" >> $GITHUB_ENV
+            echo "DISGUISE_ENABLED=false" >> $GITHUB_ENV
+          fi
+
       - name: 安装环境依赖+初始化源码仓库及llvm-clang19工具链
         run: |
           rm -rf kernel_workspace
@@ -644,21 +681,17 @@ jobs:
         run: |
           cd kernel_workspace
           echo "替换内核版本后缀..."
-          if [[ -n "${{ github.event.inputs.kernel_suffix }}" ]]; then
-            echo "当前内核版本后缀：${{ github.event.inputs.kernel_suffix }}"
-            for f in ./common/scripts/setlocalversion; do
-              sed -i "\$s|echo \"\\\$res\"|echo \"-${{ github.event.inputs.kernel_suffix }}\"|" "$f"
-            done
-            sudo sed -i 's/-4k/-${{ github.event.inputs.KERNEL_SUFFIX }}/g' ./common/arch/arm64/configs/gki_defconfig
-          else
-            echo "当前内核版本后缀：${{ env.KERNEL_NAME }}"
+          if [[ "${{ env.DISGUISE_ENABLED }}" == "true" && -n "${{ env.KERNEL_NAME }}" ]]; then
+            echo "伪装模式：当前伪装内核名称：${{ env.KERNEL_NAME }}"
             for f in ./common/scripts/setlocalversion; do
               sed -i "\$s|echo \"\\\$res\"|echo \"-${{ env.KERNEL_NAME }}\"|" "$f"
             done
             sudo sed -i 's/-4k/-${{ env.KERNEL_NAME }}/g' ./common/arch/arm64/configs/gki_defconfig
+            sed -i 's/${scm_version}//' ./common/scripts/setlocalversion
+            echo "CONFIG_LOCALVERSION_AUTO=n" >> ./common/arch/arm64/configs/gki_defconfig
+          else
+            echo "不伪装模式：内核名称由构建系统自动生成，仅去除dirty后缀"
           fi
-          sed -i 's/${scm_version}//' ./common/scripts/setlocalversion
-          echo "CONFIG_LOCALVERSION_AUTO=n" >> ./common/arch/arm64/configs/gki_defconfig
            
       - name: 构建内核
         run: |
@@ -690,47 +723,51 @@ jobs:
           echo "sloppiness = file_stat_matches,include_file_ctime,include_file_mtime,pch_defines,file_macro,time_macros" >> "$CCACHE_DIR/ccache.conf"
           
           cd kernel_workspace/common
-          wget https://github.com/$GITHUB_REPOSITORY/raw/refs/heads/$GITHUB_REF_NAME/lib/libfakestat.so
-          wget https://github.com/$GITHUB_REPOSITORY/raw/refs/heads/$GITHUB_REF_NAME/lib/libfaketimeMT.so
-          chmod 777 ./*.so
-          export FAKESTAT="2025-11-27 08:45:40"
-          export FAKETIME="@2025-11-27 08:45:40"
-          echo "FAKESTAT=$FAKESTAT" >> $GITHUB_ENV
-          echo "FAKETIME=$FAKETIME" >> $GITHUB_ENV
-          SO_DIR=$(pwd)
-          export PRELOAD_LIBS="$SO_DIR/libfakestat.so $SO_DIR/libfaketimeMT.so"
-          export REAL_CLANG_PATH="$WORKDIR/kernel_workspace/clang19/bin/clang"
-          #创建 CC (编译器) 包装器
-          echo '#!/bin/bash' > cc-wrapper
-          echo 'export LD_PRELOAD="'$PRELOAD_LIBS'"' >> cc-wrapper
-          echo 'export FAKESTAT="'$FAKESTAT'"' >> cc-wrapper
-          echo 'export FAKETIME="'$FAKETIME'"' >> cc-wrapper
-          echo 'ccache $REAL_CLANG_PATH "$@"' >> cc-wrapper
-          #创建 LD (链接器) 包装器
-          echo '#!/bin/bash' > ld-wrapper
-          echo 'export LD_PRELOAD="'$PRELOAD_LIBS'"' >> ld-wrapper
-          echo 'export FAKESTAT="'$FAKESTAT'"' >> ld-wrapper
-          echo 'export FAKETIME="'$FAKETIME'"' >> ld-wrapper
-          echo 'ld.lld "$@"' >> ld-wrapper
-          
-          # 测试时间劫持测试是否正常工作
-          echo "--- [Wrapper Test] 正在创建通用的时间劫持测试脚本 ---"
-          echo '#!/bin/bash' > test-wrapper.sh
-          echo 'export LD_PRELOAD="'$PRELOAD_LIBS'"' >> test-wrapper.sh
-          echo 'export FAKESTAT="'$FAKESTAT'"' >> test-wrapper.sh
-          echo 'export FAKETIME="'$FAKETIME'"' >> test-wrapper.sh
-          echo 'echo ">>> Wrapper 内部环境检查完毕."' >> test-wrapper.sh
-          echo 'exec "$@"' >> test-wrapper.sh # 执行所有传入的参数
-          chmod +x test-wrapper.sh
-          echo "--- [Wrapper Test] 正在测试 (date) 命令 ---"
-          ./test-wrapper.sh date
-          echo "--- [Wrapper Test] 正在测试 (stat) 命令 ---"
-          ./test-wrapper.sh stat ./Makefile
-          echo "--- [Wrapper Test] 测试完毕 ---"
-          chmod +x cc-wrapper ld-wrapper
-          echo "--- 编译前环境时间: $(LD_PRELOAD=$PRELOAD_LIBS date) ---"
-          echo "--- 编译前环境文件时间戳: ---"
-          LD_PRELOAD=$PRELOAD_LIBS stat ./Makefile
+          if [[ "${{ env.DISGUISE_ENABLED }}" == "true" ]]; then
+            echo "伪装模式：启用时间劫持..."
+            wget https://github.com/$GITHUB_REPOSITORY/raw/refs/heads/$GITHUB_REF_NAME/lib/libfakestat.so
+            wget https://github.com/$GITHUB_REPOSITORY/raw/refs/heads/$GITHUB_REF_NAME/lib/libfaketimeMT.so
+            chmod 777 ./*.so
+            FAKE_TS=$(date -u -d "${{ env.KBUILD_BUILD_TIMESTAMP }}" '+%Y-%m-%d %H:%M:%S')
+            export FAKESTAT="$FAKE_TS"
+            export FAKETIME="@$FAKE_TS"
+            echo "FAKESTAT=$FAKESTAT" >> $GITHUB_ENV
+            echo "FAKETIME=$FAKETIME" >> $GITHUB_ENV
+            SO_DIR=$(pwd)
+            export PRELOAD_LIBS="$SO_DIR/libfakestat.so $SO_DIR/libfaketimeMT.so"
+            export REAL_CLANG_PATH="$WORKDIR/kernel_workspace/clang19/bin/clang"
+            #创建 CC (编译器) 包装器
+            echo '#!/bin/bash' > cc-wrapper
+            echo 'export LD_PRELOAD="'$PRELOAD_LIBS'"' >> cc-wrapper
+            echo 'export FAKESTAT="'$FAKESTAT'"' >> cc-wrapper
+            echo 'export FAKETIME="'$FAKETIME'"' >> cc-wrapper
+            echo 'ccache $REAL_CLANG_PATH "$@"' >> cc-wrapper
+            #创建 LD (链接器) 包装器
+            echo '#!/bin/bash' > ld-wrapper
+            echo 'export LD_PRELOAD="'$PRELOAD_LIBS'"' >> ld-wrapper
+            echo 'export FAKESTAT="'$FAKESTAT'"' >> ld-wrapper
+            echo 'export FAKETIME="'$FAKETIME'"' >> ld-wrapper
+            echo 'ld.lld "$@"' >> ld-wrapper
+            
+            # 测试时间劫持测试是否正常工作
+            echo "--- [Wrapper Test] 正在创建通用的时间劫持测试脚本 ---"
+            echo '#!/bin/bash' > test-wrapper.sh
+            echo 'export LD_PRELOAD="'$PRELOAD_LIBS'"' >> test-wrapper.sh
+            echo 'export FAKESTAT="'$FAKESTAT'"' >> test-wrapper.sh
+            echo 'export FAKETIME="'$FAKETIME'"' >> test-wrapper.sh
+            echo 'echo ">>> Wrapper 内部环境检查完毕."' >> test-wrapper.sh
+            echo 'exec "$@"' >> test-wrapper.sh # 执行所有传入的参数
+            chmod +x test-wrapper.sh
+            echo "--- [Wrapper Test] 正在测试 (date) 命令 ---"
+            ./test-wrapper.sh date
+            echo "--- [Wrapper Test] 正在测试 (stat) 命令 ---"
+            ./test-wrapper.sh stat ./Makefile
+            echo "--- [Wrapper Test] 测试完毕 ---"
+            chmod +x cc-wrapper ld-wrapper
+            echo "--- 编译前环境时间: $(LD_PRELOAD=$PRELOAD_LIBS date) ---"
+            echo "--- 编译前环境文件时间戳: ---"
+            LD_PRELOAD=$PRELOAD_LIBS stat ./Makefile
+          fi
           
           # 6.12内核make编译核心配置：
           # 1. 重映射物理路径 (由于6.12内核引入了Rust代码，计算内核符号版本的工具变成了gendwarfksyms，而gendwarfksyms无法正确预处理绝对路径，故我们需要手动把绝对路径重映射为相对路径，否则内核符号校验值会大面积出错)
@@ -763,23 +800,31 @@ jobs:
           export OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump OBJSIZE=llvm-size STRIP=llvm-strip
           # 5. 编译前运行官方环境配置脚本
           source "./_setup_env.sh" 2>/dev/null || true
-          # 覆盖 _setup_env.sh 的环境变量设置，确保构建环境信息被劫持
-          export KBUILD_BUILD_USER="${{ env.KBUILD_BUILD_USER }}"
-          export KBUILD_BUILD_HOST="${{ env.KBUILD_BUILD_HOST }}"
-          export KBUILD_BUILD_TIMESTAMP="${{ env.KBUILD_BUILD_TIMESTAMP }}"
+          # 伪装模式下覆盖 _setup_env.sh 的环境变量设置，确保构建环境信息被劫持
+          if [[ "${{ env.DISGUISE_ENABLED }}" == "true" ]]; then
+            export KBUILD_BUILD_USER="${{ env.KBUILD_BUILD_USER }}"
+            export KBUILD_BUILD_HOST="${{ env.KBUILD_BUILD_HOST }}"
+            export KBUILD_BUILD_TIMESTAMP="${{ env.KBUILD_BUILD_TIMESTAMP }}"
+          fi
           #在构建内核的同时清除不必要的.NET, Android NDK, Haskell, CodeQL运行库，清理空间且不阻塞后续步骤运行
           sudo rm -rf /usr/share/dotnet &
           sudo rm -rf /usr/local/lib/android &
           sudo rm -rf /opt/ghc &
           sudo rm -rf /opt/hostedtoolcache/CodeQL &
           make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="clang" LD="ld.lld" OBJCOPY="llvm-objcopy" O=out gki_defconfig &&
-          export CC="$(pwd)/cc-wrapper" && export LD="$(pwd)/ld-wrapper" &&
-          make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="$(pwd)/cc-wrapper" LD="$(pwd)/ld-wrapper" OBJCOPY="llvm-objcopy" O=out Image
+          if [[ "${{ env.DISGUISE_ENABLED }}" == "true" ]]; then
+            export CC="$(pwd)/cc-wrapper" && export LD="$(pwd)/ld-wrapper" &&
+            make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="$(pwd)/cc-wrapper" LD="$(pwd)/ld-wrapper" OBJCOPY="llvm-objcopy" O=out Image
+          else
+            make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="ccache clang" LD="ld.lld" OBJCOPY="llvm-objcopy" O=out Image
+          fi
           
-          # 编译后时间劫持二次校验
-          echo "--- 编译后环境时间: $(LD_PRELOAD=$PRELOAD_LIBS date) ---"
-          echo "--- 编译后环境文件时间戳: ---"
-          LD_PRELOAD=$PRELOAD_LIBS stat ./Makefile
+          # 编译后时间劫持二次校验（仅伪装模式）
+          if [[ "${{ env.DISGUISE_ENABLED }}" == "true" ]]; then
+            echo "--- 编译后环境时间: $(LD_PRELOAD=$PRELOAD_LIBS date) ---"
+            echo "--- 编译后环境文件时间戳: ---"
+            LD_PRELOAD=$PRELOAD_LIBS stat ./Makefile
+          fi
           echo "内核编译完成！"
           if [[ "${{ github.event.inputs.ccache_debug }}" == "true" ]]; then
             echo "正在打包ccache日志及调试信息..."
@@ -851,12 +896,12 @@ jobs:
           if [[ ${{ github.event.inputs.kpm_enable }} == 'kpn' ]]; then
             wget https://github.com/Seria-Kernel-Builds/KPatch-Next/releases/latest/download/kpn.zip
           fi
-          if [[ -n "${{ github.event.inputs.kernel_suffix }}" ]]; then
-            AK3_NAME=AnyKernel3_${KSU_TYPENAME}_${{ env.KSUVER }}_${{ env.KERNEL_VERSION }}_${{ github.event.inputs.kernel_suffix }}.zip
-            IMG_NAME=Image_${KSU_TYPENAME}_${{ env.KSUVER }}_${{ env.KERNEL_VERSION }}_${{ github.event.inputs.kernel_suffix }}
-          else
+          if [[ -n "${{ env.KERNEL_NAME }}" ]]; then
             AK3_NAME=AnyKernel3_${KSU_TYPENAME}_${{ env.KSUVER }}_${{ env.KERNEL_VERSION }}_${{ env.KERNEL_NAME }}.zip
             IMG_NAME=Image_${KSU_TYPENAME}_${{ env.KSUVER }}_${{ env.KERNEL_VERSION }}_${{ env.KERNEL_NAME }}
+          else
+            AK3_NAME=AnyKernel3_${KSU_TYPENAME}_${{ env.KSUVER }}_${{ env.KERNEL_VERSION }}_undisguised.zip
+            IMG_NAME=Image_${KSU_TYPENAME}_${{ env.KSUVER }}_${{ env.KERNEL_VERSION }}_undisguised
           fi
           cp ./Image ../$IMG_NAME
           zip -r ../$AK3_NAME ./*
@@ -866,10 +911,10 @@ jobs:
           #为AK3添加注释（调试信息）
           CLEAN_SUB_VERSION="${{ env.SUB_VERSION }}"
           CLEAN_SUB_VERSION="${CLEAN_SUB_VERSION%_mtk}"
-          if [[ -n "${{ github.event.inputs.kernel_suffix }}" ]]; then
-            FULL_VERSION=${{ env.KERNEL_VERSION }}.${CLEAN_SUB_VERSION}-${{ github.event.inputs.kernel_suffix }}
-          else
+          if [[ -n "${{ env.KERNEL_NAME }}" ]]; then
             FULL_VERSION=${{ env.KERNEL_VERSION }}.${CLEAN_SUB_VERSION}-${{ env.KERNEL_NAME }}
+          else
+            FULL_VERSION=${{ env.KERNEL_VERSION }}.${CLEAN_SUB_VERSION}-undisguised
           fi
           TIME_NOW="$(TZ='Asia/Shanghai' date +'%Y-%m-%d %H:%M:%S')"
           echo "Author: $GITHUB_ACTOR" > ./ak3.log
@@ -939,15 +984,13 @@ jobs:
         run: |
           CLEAN_SUB_VERSION="${{ env.SUB_VERSION }}"
           CLEAN_SUB_VERSION="${CLEAN_SUB_VERSION%_mtk}"
-          if [[ -n "${{ github.event.inputs.kernel_suffix }}" ]]; then
-            FULL_VERSION=${{ env.KERNEL_VERSION }}.${CLEAN_SUB_VERSION}-${{ github.event.inputs.kernel_suffix }}
-            echo "FULL_VERSION=$FULL_VERSION" >> $GITHUB_ENV
-            export FULL_VERSION=$FULL_VERSION
+          if [[ "${{ github.event.inputs.disguise_enable }}" == "true" && -n "${{ github.event.inputs.disguise_kernel_name }}" ]]; then
+            FULL_VERSION=${{ env.KERNEL_VERSION }}.${CLEAN_SUB_VERSION}-${{ github.event.inputs.disguise_kernel_name }}
           else
-            FULL_VERSION=${{ env.KERNEL_VERSION }}.${CLEAN_SUB_VERSION}-${{ env.KERNEL_NAME }}
-            echo "FULL_VERSION=$FULL_VERSION" >> $GITHUB_ENV
-            export FULL_VERSION=$FULL_VERSION
+            FULL_VERSION=${{ env.KERNEL_VERSION }}.${CLEAN_SUB_VERSION}-undisguised
           fi
+          echo "FULL_VERSION=$FULL_VERSION" >> $GITHUB_ENV
+          export FULL_VERSION=$FULL_VERSION
           TIME="$(TZ='Asia/Shanghai' date +'%y%m%d%H%M%S')"
           TIME_FORM="$(TZ='Asia/Shanghai' date +'%Y-%m-%d %H:%M:%S')"
           echo "TIME=$TIME" >> $GITHUB_ENV
@@ -977,8 +1020,9 @@ jobs:
           - 内核版本号: ${{ env.FULL_VERSION }}
           - 编译时间: ${{ env.TIME_FORM }}
           - KSU分支：${{ env.KSU_TYPENAME }}
-          - 伪装时间： ${{ env.KBUILD_BUILD_TIMESTAMP }}
-          - 伪装编译信息：${{ env.KBUILD_BUILD_USER }}@${{ env.KBUILD_BUILD_HOST }}
+          - 伪装模式：${{ github.event.inputs.disguise_enable == 'true' && '已启用' || '已关闭' }}
+          - 伪装时间：${{ github.event.inputs.disguise_enable == 'true' && github.event.inputs.disguise_build_timestamp || '未伪装' }}
+          - 伪装编译信息：${{ github.event.inputs.disguise_enable == 'true' && format('{0}@{1}', github.event.inputs.disguise_build_user, github.event.inputs.disguise_build_host) || '未伪装' }}
           - susfs支持：${{ github.event.inputs.susfs_enable }}
           - KPM支持 ：${{ github.event.inputs.kpm_enable }}
           - LZ4支持：${{ github.event.inputs.lz4_enable }}
