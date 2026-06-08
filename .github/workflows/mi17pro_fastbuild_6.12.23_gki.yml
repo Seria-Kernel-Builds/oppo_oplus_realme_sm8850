@@ -957,7 +957,7 @@ jobs:
           - 伪装时间：${{ github.event.inputs.disguise_enable == 'true' && github.event.inputs.disguise_build_timestamp || '未伪装' }}
           - 伪装编译信息：${{ github.event.inputs.disguise_enable == 'true' && format('{0}@{1}', github.event.inputs.disguise_build_user, github.event.inputs.disguise_build_host) || '未伪装' }}
           - susfs支持：${{ github.event.inputs.susfs_enable }}
-          - KPM支持 ：${{ github.event.inputs.kpm_enable }}
+          - KPN支持 ：${{ github.event.inputs.kpm_enable }}
           - LZ4支持：${{ github.event.inputs.lz4_enable }}
           - LZ4KD支持：${{ github.event.inputs.lz4kd_enable }}
           - 网络功能增强：${{ github.event.inputs.better_net }}
